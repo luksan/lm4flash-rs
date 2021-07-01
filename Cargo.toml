@@ -1,0 +1,11 @@
+[package]
+name = "lm4flash"
+version = "0.2.0"
+edition = "2018"
+license = "GPL-2.0-or-later"
+
+[dependencies]
+anyhow = "1"
+once_cell = "1.8.0"
+rusb = "0.8.1"
+structopt = "0.3"

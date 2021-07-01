@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use rusb::{DeviceHandle, UsbContext};
+use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 
 const ENDPOINT_IN: u8 = 0x83;
@@ -13,7 +14,7 @@ pub const FLASH_BLOCK_SIZE: u32 = 512;
 pub const FLASH_ERASE_SIZE: u32 = 1024;
 const BUF_SIZE: usize = (64 + 2 * FLASH_BLOCK_SIZE) as usize;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ReceiveBuffer {
     data: Box<[u8]>,
     len: usize,
@@ -67,6 +68,12 @@ impl ReceiveBuffer {
     }
     pub fn has_ack(&self) -> bool {
         self.len > 0 && self.data[0] == b'+'
+    }
+}
+
+impl Debug for ReceiveBuffer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", &self[..])
     }
 }
 

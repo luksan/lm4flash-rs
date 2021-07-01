@@ -103,10 +103,10 @@ fn flasher_flash() -> Result<()> {
 fn print_icdi_version(device: &mut impl IcdiDevice) -> Result<()> {
     let mut response = device.send_command(b"version")?;
     response.decode_buffer();
-    if &response[..2] != b"+$" {
-        bail!("ICDI version response error")
-    }
-    let hex_number = response[2..]
+
+    let hex_number = response
+        .strip_prefix(b"+$")
+        .context("ICDI version response error")?
         .split(|&c| c == b'#')
         .next()
         .context("Failed to find # in version")?;

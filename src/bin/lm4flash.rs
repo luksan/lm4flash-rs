@@ -23,14 +23,8 @@ use once_cell::sync::OnceCell;
 use rusb::{Device, GlobalContext};
 use structopt::{clap::AppSettings, StructOpt};
 
-use lib::{IcdiDevice, FLASH_BLOCK_SIZE, FLASH_ERASE_SIZE};
-
-mod lib;
-
-const ICDI_VID: u16 = 0x1cbe;
-const ICDI_PID: u16 = 0x00fd;
-
-const INTERFACE_NR: u8 = 0x02;
+use lm4flash::usb::{ICDI_PID, ICDI_VID, INTERFACE_NR};
+use lm4flash::{IcdiDevice, FLASH_BLOCK_SIZE, FLASH_ERASE_SIZE};
 
 const FP_CTRL: u32 = 0x3000000;
 const DHCSR: u32 = 0xe000edf0;
@@ -101,7 +95,7 @@ fn flasher_flash() -> Result<()> {
 }
 
 fn print_icdi_version(device: &mut impl IcdiDevice) -> Result<()> {
-    let mut response = device.send_command(b"version")?;
+    let mut response = device.send_remote_command(b"version")?;
     response.decode_buffer();
 
     let hex_number = response
@@ -125,7 +119,7 @@ fn print_icdi_version(device: &mut impl IcdiDevice) -> Result<()> {
 }
 fn write_firmware(mut dev: impl IcdiDevice, fw: &[u8]) -> Result<()> {
     print_icdi_version(&mut dev)?;
-    dev.send_command(b"debug clock \0")?;
+    dev.send_remote_command(b"debug clock \0")?;
     dev.send_string(b"qSupported")?;
     dev.send_string(b"?")?;
     dev.mem_write(FP_CTRL, 0x3000000)?;
@@ -133,7 +127,7 @@ fn write_firmware(mut dev: impl IcdiDevice, fw: &[u8]) -> Result<()> {
     dev.mem_read(DID1)?;
     dev.send_string(b"?")?;
     dev.mem_read(DHCSR)?;
-    dev.send_command(b"debug sreset")?;
+    dev.send_remote_command(b"debug sreset")?;
     dev.mem_read(DHCSR)?;
     dev.mem_read(ROMCTL)?;
     dev.mem_write(ROMCTL, 0)?;
@@ -160,7 +154,7 @@ fn write_firmware(mut dev: impl IcdiDevice, fw: &[u8]) -> Result<()> {
         dev.flash_erase(0, 0)?;
     }
 
-    dev.send_command(b"debug creset")?;
+    dev.send_remote_command(b"debug creset")?;
     dev.mem_read(DHCSR)?;
 
     dev.mem_write(DHCSR, 0)?;
@@ -185,13 +179,13 @@ fn write_firmware(mut dev: impl IcdiDevice, fw: &[u8]) -> Result<()> {
             address += FLASH_BLOCK_SIZE;
         }
     };
-    dev.send_command(b"set vectorcatch 0")?;
-    dev.send_command(b"debug disable")?;
+    dev.send_remote_command(b"set vectorcatch 0")?;
+    dev.send_remote_command(b"debug disable")?;
 
     dev.mem_write(FP_CTRL, 0x3000000)?;
-    dev.send_command(b"debug hreset")?;
-    dev.send_command(b"set vectorcatch 0")?;
-    dev.send_command(b"debug disable")?;
+    dev.send_remote_command(b"debug hreset")?;
+    dev.send_remote_command(b"set vectorcatch 0")?;
+    dev.send_remote_command(b"debug disable")?;
 
     Ok(())
 }

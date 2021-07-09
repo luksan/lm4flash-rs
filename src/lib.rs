@@ -1,11 +1,14 @@
 use std::convert::TryInto;
+use std::fmt::{Debug, Formatter};
 use std::io::Write;
+use std::ops::Deref;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use rusb::{DeviceHandle, UsbContext};
-use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
+
+pub mod icdi_cmd;
+pub mod usb;
 
 const ENDPOINT_IN: u8 = 0x83;
 const ENDPOINT_OUT: u8 = 0x02;
@@ -39,8 +42,19 @@ impl ReceiveBuffer {
                 bail!("Buffer couldn't hold the full response.")
             }
             len += device
-                .read_bulk(ENDPOINT_IN, slice, Duration::default())
-                .context("Error receiving data")?;
+                .read_bulk(ENDPOINT_IN, slice, Duration::from_secs(1))
+                .with_context(|| {
+                    let s = &buf.data[0..len];
+                    format!(
+                        "Error receiving data: Receved so far len:{}, {}",
+                        len,
+                        std::str::from_utf8(s).unwrap()
+                    )
+                })?;
+            if len > 5 && buf.data[len - 4] == b'#' && buf.data[len - 1] == 0 {
+                len -= 1;
+                break;
+            }
         }
         buf.len = len;
         Ok(buf)
@@ -66,6 +80,41 @@ impl ReceiveBuffer {
         self.len = write;
         self.decoded = true;
     }
+    pub fn get_payload(&self) -> Result<&[u8]> {
+        let start = self.iter().position(|&c| c == b'$');
+        let end = self.iter().rposition(|&c| c == b'#');
+        if let (Some(start), Some(end)) = (start, end) {
+            Ok(&self[start + 1..end])
+        } else {
+            Err(anyhow!("Malformed ICDI response"))
+        }
+    }
+
+    pub fn payload_str(&self) -> Result<&str> {
+        let p = self.get_payload()?;
+        std::str::from_utf8(p)
+            .with_context(|| format!("Response payload not UTF-8. {:?}", &p[0..100.min(p.len())]))
+    }
+
+    pub fn check_cmd_result(&self) -> Result<()> {
+        let payload = self.get_payload()?;
+        if payload.len() == 0 {
+            bail!("Zero-length payload.");
+        }
+        if payload.starts_with(b"OK") {
+            Ok(())
+        } else if payload[0] == b'E' {
+            let err = std::str::from_utf8(&payload[1..3])
+                .context("Err HEX not UTF-8")
+                .map(|s| {
+                    u8::from_str_radix(s, 16)
+                        .with_context(|| format!("Error code decode error, {:?}", &payload[1..3]))
+                })??;
+            Err(anyhow!("ICDI command response contained error {}", err))
+        } else {
+            Ok(()) // assume ok
+        }
+    }
     pub fn has_ack(&self) -> bool {
         self.len > 0 && self.data[0] == b'+'
     }
@@ -87,7 +136,7 @@ impl Deref for ReceiveBuffer {
 
 pub trait IcdiDevice {
     // These are macros in the C original
-    fn send_command(&mut self, cmd: &[u8]) -> Result<ReceiveBuffer> {
+    fn send_remote_command(&mut self, cmd: &[u8]) -> Result<ReceiveBuffer> {
         self.send_u8_hex(b"qRcmd,", cmd)
     }
     fn send_string(&mut self, str: &[u8]) -> Result<ReceiveBuffer> {
@@ -199,7 +248,7 @@ impl<CTX: rusb::UsbContext> IcdiDevice for DeviceHandle<CTX> {
     }
 
     fn send(&mut self, data: &[u8]) -> Result<()> {
-        self.write_bulk(ENDPOINT_OUT, data, std::time::Duration::from_secs(0))
+        self.write_bulk(ENDPOINT_OUT, data, std::time::Duration::from_secs(1))
             .context("Error transmitting data")
             .and_then(|transmitted| {
                 if transmitted == data.len() {
